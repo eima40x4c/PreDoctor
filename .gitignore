@@ -1,4 +1,5 @@
+__pycache__/
 .ipynb_checkpoints
 .jupyter
 Datasets/
-Models/skin_cancer_model.h5
+Models/skin_classifier.h5
