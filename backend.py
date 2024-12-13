@@ -1,17 +1,21 @@
 from pydantic import BaseModel
 from fastapi import FastAPI, UploadFile, File
 import numpy as np
+import pandas as pd
+
 from joblib import load
 from keras.models import load_model
+from PIL import Image
 
 
 models = {}
 class PredictionRequest(BaseModel):
-    input_data: list  # List of input features for prediction
-    model_type: str  # e.g., "deep" or "ml" to distinguish the model
+    input_data_path: str 
+    model_type: str
 
 
 app = FastAPI()
+
 
 @app.on_event("startup")
 def load_models():
@@ -25,18 +29,16 @@ def load_models():
                 models[model_path] = load(file)
             else:
                 models[model_path] = load_model(full_path)
-    print(models)
 
 
 @app.post("/predict/")
 def predict(request: PredictionRequest):
-    input_data = np.array(request.input_data).reshape(1, -1)
     if request.model_type == "breast":
-        prediction = breast_prediction()
+        prediction = breast_prediction(pd.read_csv(request.input_data_path))
     elif request.model_type == "rna-seq":
-        prediction = rna_prediction()
+        prediction = rna_prediction(pd.read_csv(request.input_data_path))
     elif request.model_type == "lung":
-        prediction = lung_prediction()
+        prediction = lung_prediction(pd.read_csv(request.input_data_path))
     elif request.model_type == "leukemia":
         prediction = leukemia_prediction()
     elif request.model_type == "kidney":
@@ -44,10 +46,10 @@ def predict(request: PredictionRequest):
     elif request.model_type == "skin":
         prediction = skin_prediction()
     
-    return {"prediction": prediction}
+    return {"prediction": prediction.tolist()} # Convert to list for JSON serialization
 
 
-def breast_prediction(sample: dict):
+def breast_prediction(sample: pd.DataFrame) -> str:
     breast_model_data = models["breast_classifier.pkl"]
     breast_model = breast_model_data['model']
 
@@ -62,23 +64,19 @@ def breast_prediction(sample: dict):
         return "NO"
 
 
-def rna_prediction(sample: dict):
+def rna_prediction(sample: pd.DataFrame) -> str:
     rna_model_data = models['rna-seq_classifier.pkl']
     rna_model = rna_model_data['model']
     pca = rna_model_data['pca']
-
-    low_variance_mask = rna_model_data['low_variance_mask']
-    means = rna_model_data['column_means']
-    stds = rna_model_data['column_stds']
+    scaler = rna_model_data['std_scaler']
     
-    filtered_features = sample.iloc[:, ~low_variance_mask]
-    scaled_sample = (filtered_features - means) / stds
+    scaled_sample = scaler.transform(sample.to_numpy().reshape(1, -1))
     reduced_data = pca.transform(scaled_sample)
 
     return rna_model.predict(reduced_data) # Labeled
 
 
-def lung_prediction(sample: dict):
+def lung_prediction(sample: np.ndarray) -> str:
     lung_model = models['lung_classifier.h5']
     mean, std = load("Models/lung_metadata.pkl").values()
     sample['age'] = (sample['age'] - mean) / std
@@ -94,14 +92,21 @@ def lung_prediction(sample: dict):
     else: 
         return "NO"
 
+# TODO: Complete
+def kidney_prediction() -> str: 
+    return "Placeholder"
 
-def kidney_prediction(): 
-    pass
+# TODO: Complete
+def skin_prediction() -> str:
+    return "Also a placeholder"
+
+# TODO: Complete
+def leukemia_prediction() -> str:
+    return "A placeholder.. Do you really think it's that easy?!"
 
 
-def skin_prediction():
-    pass
-
-
-def leukemia_prediction():
-    pass
+# TODO: Adjust as needed
+def read_image(file_path):
+    image = Image.open(file_path)
+    image_array = np.array(image.resize((224, 224)))  # Resize if needed
+    return image_array.reshape(1, -1)  # Reshape for prediction
