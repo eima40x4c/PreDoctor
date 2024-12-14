@@ -2,19 +2,20 @@ from pydantic import BaseModel
 from fastapi import FastAPI, UploadFile, File
 import numpy as np
 import pandas as pd
+import warnings
 
 from joblib import load
 from keras.models import load_model
 from PIL import Image
 
-
+warnings.filterwarnings('ignore')
 models = {}
+
+app = FastAPI()
+
 class PredictionRequest(BaseModel):
     input_data_path: str 
     model_type: str
-
-
-app = FastAPI()
 
 
 @app.on_event("startup")
@@ -46,22 +47,20 @@ def predict(request: PredictionRequest):
     elif request.model_type == "skin":
         prediction = skin_prediction()
     
-    return {"prediction": prediction.tolist()} # Convert to list for JSON serialization
+    if isinstance(prediction, (np.ndarray)):
+            prediction = prediction.tolist()  
+    return {"prediction": prediction} # Convert to list for JSON serialization
 
 
 def breast_prediction(sample: pd.DataFrame) -> str:
     breast_model_data = models["breast_classifier.pkl"]
     breast_model = breast_model_data['model']
 
-    means = breast_model_data['column_means']
-    stds = breast_model_data['column_stds']
-    sample = (sample - means) / stds
-
-    prediction = breast_model.predict(sample)
+    prediction = breast_model.predict(sample.to_numpy().reshape(1, -1))
     if prediction == 1:
-        return "YES"
+        return ["Malignant"]
     else: 
-        return "NO"
+        return ["Benign"]
 
 
 def rna_prediction(sample: pd.DataFrame) -> str:
@@ -76,21 +75,17 @@ def rna_prediction(sample: pd.DataFrame) -> str:
     return rna_model.predict(reduced_data) # Labeled
 
 
-def lung_prediction(sample: np.ndarray) -> str:
+def lung_prediction(sample: pd.DataFrame) -> str:
     lung_model = models['lung_classifier.h5']
-    mean, std = load("Models/lung_metadata.pkl").values()
-    sample['age'] = (sample['age'] - mean) / std
-    
-    if sample['GENDER'] == 'M': 
-        sample['GENDER'] = 1
-    else:
-        sample['GENDER'] = 0
+    scaler = load("Models/lung_metadata.pkl")['std_scaler']
 
-    prediction = lung_model.predict(sample) # Unlabeled
-    if prediction == 1:
-        return "YES"
+    scaled_sample = scaler.transform(sample.to_numpy().reshape(1, -1))
+
+    prediction = lung_model.predict(scaled_sample) # Unlabeled
+    if prediction >= 0.5:
+        return "Malignant"
     else: 
-        return "NO"
+        return "Benign"
 
 # TODO: Complete
 def kidney_prediction() -> str: 
