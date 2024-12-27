@@ -1,10 +1,9 @@
-from pydantic import BaseModel
-from fastapi import FastAPI, UploadFile, File
 import numpy as np
 import pandas as pd
+from fastapi import FastAPI
+from pydantic import BaseModel
 import warnings
-from fastapi.responses import JSONResponse
-from tensorflow.keras.preprocessing.image import img_to_array, load_img
+
 from joblib import load
 from keras.models import load_model
 from PIL import Image
@@ -42,11 +41,11 @@ def predict(request: PredictionRequest):
     elif request.model_type == "lung":
         prediction = lung_prediction(pd.read_csv(request.input_data_path))
     elif request.model_type == "leukemia":
-        prediction = leukemia_prediction(load_img(request.input_data_path))
+        prediction = leukemia_prediction(preprocess_image(request.input_data_path))
     elif request.model_type == "kidney":
-        prediction = kidney_prediction(load_img(request.input_data_path))
+        prediction = kidney_prediction(preprocess_image(request.input_data_path))
     elif request.model_type == "skin":
-        prediction = skin_prediction(load_img(request.input_data_path))
+        prediction = skin_prediction(preprocess_image(request.input_data_path, scaled=True))
     
     if isinstance(prediction, (np.ndarray)):
             prediction = prediction.tolist()  
@@ -79,7 +78,6 @@ def rna_prediction(sample: pd.DataFrame) -> str:
 def lung_prediction(sample: pd.DataFrame) -> str:
     lung_model = models['lung_classifier.h5']
     scaler = load("Models/lung_metadata.pkl")['std_scaler']
-
     scaled_sample = scaler.transform(sample.to_numpy().reshape(1, -1))
 
     prediction = lung_model.predict(scaled_sample) # Unlabeled
@@ -88,46 +86,44 @@ def lung_prediction(sample: pd.DataFrame) -> str:
     else: 
         return "Benign"
 
-def preprocess_image(image: Image.Image, target_size=None):
-    if (not target_size ):
-        image = image.resize(target_size)  # Resize to model's input size
-        image = img_to_array(image)       # Convert image to array
-        image = image / 255.0            # Rescale pixel values
-        image = np.expand_dims(image, axis=0)  # Add batch dimension
-    return image
 
-# TODO: Complete
+def leukemia_prediction(image: Image.Image) -> str:
+    model = models['leukemia_classifier.h5']
+    prediction = model.predict(image)
+    print(prediction)
+    if prediction >= 0.5:
+        return "Malignant"
+    else: 
+        return "Benign"
+
+
 def kidney_prediction(image: Image.Image) -> str: 
     model = models['kidney_classifier.h5']
-    preprocessed_image = preprocess_image(image, target_size=(224, 224))
-    prediction = model.predict(preprocessed_image)
-    predicted_class = int(np.argmax(prediction, axis=1)[0])
-    confidence = float(np.max(prediction))
-    return {"predicted_class": predicted_class, "confidence": confidence}
+    prediction = model.predict(image)
+    if prediction >= 0.5:
+        return "Malignant"
+    else: 
+        return "Benign"
 
 
-# TODO: Complete
 def skin_prediction(image: Image.Image) -> str:
     model = models['skin_classifier.h5']
-    preprocessed_image = preprocess_image(image, target_size=(224, 224))
-    prediction = model.predict(preprocessed_image)
-    predicted_class = int(np.argmax(prediction, axis=1)[0])
-    confidence = float(np.max(prediction))
-    return {"predicted_class": predicted_class, "confidence": confidence}
+    class_names = ['actinic keratosis', 'basal cell carcinoma', 'dermatofibroma',
+                   'melanoma', 'nevus', 'pigmented benign keratosis', 'seborrheic keratosis',
+                   'squamous cell carcinoma', 'vascular lesion']
 
-# TODO: Complete
-def leukemia_prediction(image: Image.Image) -> dict:
-    model = models['leukemia_classifier.h5']
-    preprocessed_image = preprocess_image(image, target_size=(224, 224))
-    prediction = model.predict(preprocessed_image)
-    predicted_class = int(np.argmax(prediction, axis=1)[0])
-    confidence = float(np.max(prediction))
-    return {"predicted_class": predicted_class, "confidence": confidence}
+    prediction = np.argmax(model.predict(image))
+    return class_names[prediction]
 
 
-# TODO: Adjust as needed
-def read_image(file_path):
+def preprocess_image(file_path, scaled=False):
     image = Image.open(file_path)
-    image_array = np.array(image.resize((224, 224)))  # Resize if needed
-    return image_array.reshape(1, -1)  # Reshape for prediction
+    if image.mode != 'RGB':
+            image = image.convert('RGB')
+
+    image = image.resize((224, 224))
+    image_array = np.array(image)
+    if not scaled:
+        image_array = image_array / 255.0
+    return image_array.reshape(1, 224, 224, 3)
 
